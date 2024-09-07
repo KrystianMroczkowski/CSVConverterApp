@@ -2,9 +2,11 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Azure;
 using CSVConverter.Models;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace CSVConverter
@@ -12,10 +14,12 @@ namespace CSVConverter
     public class CSVConverterFunction
     {
         private readonly ILogger _logger;
+		private readonly IConfiguration _config;
 
-        public CSVConverterFunction(ILoggerFactory loggerFactory)
+        public CSVConverterFunction(ILoggerFactory loggerFactory, IConfiguration config)
         {
             _logger = loggerFactory.CreateLogger<CSVConverterFunction>();
+			_config = config;
         }
 
         [Function("CSVConverterFunction")]
@@ -23,7 +27,21 @@ namespace CSVConverter
         {
             var data = await JsonSerializer.DeserializeAsync<List<PersonModel>>(req.Body);
 
-			var csv = ConvertToCSV(data);
+			if (data is null || data.Count == 0)
+			{
+				_logger.LogError("No data found in request body.");
+				return req.CreateResponse(HttpStatusCode.BadRequest);	
+			}
+
+			bool? includeHeader = _config.GetValue<bool>("includeHeaders");
+
+			if (includeHeader is null)
+			{
+				_logger.LogError("No includeHeaders value found in configuration.");
+				return req.CreateResponse(HttpStatusCode.InternalServerError);
+			}
+
+			var csv = ConvertToCSV(data, includeHeader);
 
 			var response = req.CreateResponse(HttpStatusCode.OK);
 
@@ -34,10 +52,13 @@ namespace CSVConverter
 			return response;
         }
 
-		private string ConvertToCSV(List<PersonModel> data)
+		private string ConvertToCSV(List<PersonModel> data, bool? includeHeader)
 		{
 			var csvBuilder = new StringBuilder();
-			csvBuilder.AppendLine("Id,FirstName,LastName");
+			if (includeHeader is true)
+			{
+				csvBuilder.AppendLine("Id,FirstName,LastName");
+			}
 
 			foreach (var person in data)
 			{
